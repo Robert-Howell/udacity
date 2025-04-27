@@ -6,6 +6,7 @@ from airflow.operators.dummy import DummyOperator
 from operators import (StageToRedshiftOperator, LoadFactOperator,
                        LoadDimensionOperator, DataQualityOperator)
 from helpers import SqlQueries
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 default_args = {
     'owner': 'udacity',
@@ -17,6 +18,7 @@ default_args = {
     'catchup': False,
     'email_on_retry': False
 }
+s3 = Variable.get('s3_bucket')
 
 @dag(
     default_args=default_args,
@@ -32,10 +34,10 @@ def final_project():
         redshift_conn_id='redshift_default',
         aws_credentials_id='aws_credentials',
         table='staging_events',
-        s3_bucket='wgu-udacity-d608-bjordan',
-        s3_key='log-data'
-        json_path='s3://wgu-udacity-d608-bjordan/log_json_path.json',
-        provide_context=True
+        s3_bucket=s3,
+        s3_key='log-data',
+        s3_path=f's3://{s3}/log-data',
+        json_path=f's3://{s3}/log_json_path.json'
     )
 
     stage_songs_to_redshift = StageToRedshiftOperator(
@@ -43,10 +45,10 @@ def final_project():
         redshift_conn_id='redshift_default',
         aws_credentials_id='aws_credentials',
         table='staging_songs',
-        s3_bucket='wgu-udacity-d608-bjordan',
-        s3_key='song-data'
-        json_path='auto',
-        provide_context=True
+        s3_bucket=s3,
+        s3_key='song-data',
+        s3_path=f's3://{s3}/song-data',
+        json_path='auto'
     )
 
     load_songplays_table = LoadFactOperator(
@@ -92,5 +94,9 @@ def final_project():
             {'check_sql': 'SELECT COUNT(*) FROM users WHERE userid IS NULL;', 'expected_result': 0}
         ]
     )
+
+    end_operator = DummyOperator(task_id='Stop_execution')
+
+    start_operator >> [stage_events_to_redshift, stage_songs_to_redshift] >> load_songplays_table >> [load_user_dimension_table, load_song_dimension_table, load_artist_dimension_table, load_time_dimension_table] >> run_quality_checks >> end_operator
 
 final_project_dag = final_project()
